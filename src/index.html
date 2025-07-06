@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="ja">
+	<head>
+		<meta charset="utf-8">
+		<title>OPFS ServiceWorker Demo</title>
+		<script src="main.js"></script>
+	</head>
+	<body>
+		<h1>OPFS + Service Worker Pseudo-Server Demo</h1>
+		<p><button id="init">Write file to OPFS</button></p>
+		<p>After writing, click the link below to open the HTML on OPFS. <a id="preview-link" href="/test/static/index.html" target="_blank">Open /static/index.html</a></p>
+	</body>
+	<script>
+		const script = 'script';
+		document.getElementById('init').addEventListener('click', async () => {
+			await writeFileAtOpfs('static/index.html', `<!DOCTYPE html><html><head><${script} src="./js/app.js"></${script}></head><body><h1>OPFS Server Operation Check</h1></body></html>`);
+			await writeFileAtOpfs('static/js/app.js', `console.log('Hello from OPFS-served JS!');`);
+			console.log('Finished writing to OPFS');
+		});
+
+		if ('serviceWorker' in navigator) {
+			window.addEventListener('load', () => {
+				navigator.serviceWorker.register('sw.js', { scope: "./" })
+				.then(reg => console.log('SW registered:', reg.scope))
+				.catch(err => console.error('SW registration failed:', err));
+			});
+		}
+	</script>
+</html>
