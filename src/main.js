@@ -1,4 +1,18 @@
-// main.js
+import { register, setRoot, clearRoots } from './lws.js';
+
+document.addEventListener('DOMContentLoaded', () => {
+	document.getElementById('select-root').addEventListener('click', async () => {
+		const handle = await window.showDirectoryPicker();
+		setRoot('/test/static', handle);
+	});
+	document.getElementById('clear-root').addEventListener('click', () => {
+		clearRoots();
+	});
+
+	if ('serviceWorker' in navigator) {
+		window.addEventListener('load', () => register('static'));
+	}
+});
 
 // Obtain the root handle of the OPFS
 async function getOpfsRoot() {
