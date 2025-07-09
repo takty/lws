@@ -2,7 +2,7 @@
  * Service Worker for Local Web Server (LWS)
  *
  * @author Takuto Yanagida
- * @version 2025-07-08
+ * @version 2025-07-09
  */
 
 import { saveFileMap, loadFileMap } from './lib/map-idb.js';
@@ -25,11 +25,12 @@ self.addEventListener('activate', async evt => {
 });
 
 self.addEventListener('message', async evt => {
-	if (evt.data.action === 'STORE_ROOT') {
-		const { path, handle } = evt.data;
+	console.log(`LWS: SW received message: ${evt.data.action}`);
+	if (evt.data.action === 'SET_ROOTS') {
+		const { path, roots } = evt.data;
 		readyPromise = readyPromise
 			.then(() => {
-				rootMap.set(path, handle);
+				rootMap.set(path, roots);
 				return saveFileMap(DB_NAME, STORE_NAME, rootMap);
 			})
 			.then(() => { return; });
@@ -48,64 +49,50 @@ self.addEventListener('message', async evt => {
 
 self.addEventListener('fetch', async evt => {
 	const url = new URL(evt.request.url);
-	console.log(`Fetch request for: ${url.pathname}`);
-
+	console.log(`LWS: Fetch request for: ${url.pathname}`);
 	await readyPromise;
-	console.log(`File map size: ${rootMap.size}`);
 
-	for (const [path, root] of rootMap.entries()) {
-		console.log(`Checking path: ${path} against request: ${url.pathname}, directory: ${root.name}`);
-
-		// Check for the virtual-path prefix
+	for (const [path, roots] of rootMap.entries()) {
 		if (url.pathname.startsWith(path)) {
+			const pathname = url.pathname.slice(path.length);
+
 			evt.respondWith((async () => {
+				for (const root of roots) {
+					console.log(`LWS: Checking path: ${path} against request: ${url.pathname}, directory: ${root.name}`);
 
-				const pathname = url.pathname.slice(path.length);
-				console.log(pathname);
-
-				try {
-					// // Obtain the root directory of the OPFS
-					// const root = await navigator.storage.getDirectory();
-
-					// Convert virtual path '/static/a/b.html' - ['static', 'a', 'b.html']
-					const segments = pathname.split('/').filter(Boolean);
-					// Remove the leading 'static' (which denotes the root directory)
-					// segments.shift();
-
-					// Treat the last segment as the filename, the rest as subdirectories
-					const filename = segments.pop();
-					const dir = await getDirectory(root, segments);
-					console.log(`Serving file: ${filename} from directory: ${dir.name}`);
-
-					// Retrieve the file handle and read its contents
-					const fileHandle = await dir.getFileHandle(filename);
-					const file       = await fileHandle.getFile();
-					const body       = await file.arrayBuffer();
-
-					// Determine Content-Type based on file extension
-					const ext = filename.split('.').pop().toLowerCase();
-					const mimeMap = {
-						'html': 'text/html; charset=utf-8',
-						'js'  : 'application/javascript; charset=utf-8',
-						'css' : 'text/css; charset=utf-8',
-						// Add additional mappings as needed
-					};
-					const contentType = mimeMap[ext] || 'application/octet-stream';
-
-					return new Response(body, {
-						headers: { 'Content-Type': contentType }
-					});
-				} catch (err) {
-					// Return 404 for non-existent files, etc.
-					return new Response('Not found', { status: 404 });
+					const rf = await getRequestedFile(root, pathname);
+					if (rf) {
+						const [filename, body] = rf;
+						return createResponse(body, filename);
+					}
 				}
+				return new Response('LWS: Not found', { status: 404 });
 			})());
 		}
 	}
-	// return new Response('Not found', { status: 404 });
-
 	// Fallback to the default network behavior for all other requests
 });
+
+async function getRequestedFile(root, pathname) {
+	const segments  = pathname.split('/').filter(Boolean);
+	const filenames = pathname.endsWith('/') ? ['index.html', 'index.htm'] : [segments.pop()];
+
+	for (const filename of filenames) {
+		try {
+			const dir = await getDirectory(root, segments);
+			console.log(`LWS: Serving file: ${filename} from directory: ${dir.name}`);
+
+			// Retrieve the file handle and read its contents
+			const fileHandle = await dir.getFileHandle(filename);
+			const file       = await fileHandle.getFile();
+			const body       = await file.arrayBuffer();
+
+			return [filename, body];
+		} catch (err) {
+		}
+	}
+	return null;
+}
 
 // Recursive helper for obtaining nested directories within the service worker
 async function getDirectory(rootHandle, pathSegments) {
@@ -116,3 +103,15 @@ async function getDirectory(rootHandle, pathSegments) {
 	return dir;
 }
 
+function createResponse(body, filename) {
+	const ext = filename.split('.').pop().toLowerCase();
+	const mimeMap = {
+		'html': 'text/html; charset=utf-8',
+		'css' : 'text/css; charset=utf-8',
+		'js'  : 'application/javascript; charset=utf-8',
+	};
+	const contentType = mimeMap[ext] || 'application/octet-stream';
+	return new Response(body, {
+		headers: { 'Content-Type': contentType }
+	});
+}

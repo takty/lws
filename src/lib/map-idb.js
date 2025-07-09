@@ -1,6 +1,8 @@
-/*
- * map-idb.js
+/**
  * This module provides functions to save and load a map using IndexedDB.
+ *
+ * @author Takuto Yanagida
+ * @version 2025-07-09
  */
 
 /**
@@ -37,8 +39,8 @@ export async function saveFileMap(dbName, storeName, map) {
 		const store = tx.objectStore(storeName);
 
 		store.clear();
-		for (const [path, handle] of map.entries()) {
-			store.put(handle, path);
+		for (const [key, value] of map.entries()) {
+			store.put(value, key);
 		}
 		tx.oncomplete = () => resolve();
 		tx.onerror    = () => reject(tx.error);

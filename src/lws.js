@@ -3,7 +3,7 @@
  * A simple local web server implemented using Service Worker.
  *
  * @author Takuto Yanagida
- * @version 2025-07-08
+ * @version 2025-07-09
  */
 
 export function register(scope = './') {
@@ -12,12 +12,12 @@ export function register(scope = './') {
 		.catch(err => console.error('LWS: SW registration failed:', err));
 }
 
-export async function setRoot(path, handle) {
+export async function setRoots(path, roots) {
 	const reg = await navigator.serviceWorker.ready;
 	reg.active.postMessage(
-		{ action: 'STORE_ROOT', path, handle }
+		{ action: 'SET_ROOTS', path, roots }
 	);
-	console.log(`LWS: Stored ${path} to SW`);
+	console.log('LWS: Set root directories to SW');
 }
 
 export async function clearRoots() {
@@ -25,5 +25,5 @@ export async function clearRoots() {
 	reg.active.postMessage(
 		{ action: 'CLEAR_ROOTS' }
 	);
-	console.log('LWS: Cleared root directory in SW');
+	console.log('LWS: Cleared root directories in SW');
 }
