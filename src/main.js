@@ -6,7 +6,8 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 	document.getElementById('select-root').addEventListener('click', async () => {
 		const handle = await window.showDirectoryPicker();
-		setRoots('/test/static/', [r, handle]);
+		const path   = location.pathname;
+		setRoots(`${path.replace(/(.+)\/$/, '$1')}/static/`, [r, handle]);
 	});
 	document.getElementById('clear-root').addEventListener('click', () => {
 		clearRoots();
