@@ -2,7 +2,7 @@
  * Service Worker for Local Web Server (LWS)
  *
  * @author Takuto Yanagida
- * @version 2025-07-09
+ * @version 2025-07-12
  */
 
 import { saveFileMap, loadFileMap } from './lib/map-idb.js';
@@ -25,7 +25,7 @@ self.addEventListener('activate', async evt => {
 });
 
 self.addEventListener('message', async evt => {
-	console.log(`LWS: SW received message: ${evt.data.action}`);
+	console.log(`LWS-SW: Received message: ${evt.data.action}`);
 	if (evt.data.action === 'SET_ROOTS') {
 		const { path, roots } = evt.data;
 		readyPromise = readyPromise
@@ -49,7 +49,7 @@ self.addEventListener('message', async evt => {
 
 self.addEventListener('fetch', async evt => {
 	const url = new URL(evt.request.url);
-	console.log(`LWS: Fetch request for: ${url.pathname}`);
+	console.log(`LWS-SW: Fetching request for: ${url.pathname}`);
 	await readyPromise;
 
 	for (const [path, roots] of rootMap.entries()) {
@@ -58,7 +58,7 @@ self.addEventListener('fetch', async evt => {
 
 			evt.respondWith((async () => {
 				for (const root of roots) {
-					console.log(`LWS: Checking path: ${path} against request: ${url.pathname}, directory: ${root.name}`);
+					console.log(`LWS-SW: Checking path: ${path} against request: ${url.pathname}, directory: ${root.name}`);
 
 					const rf = await getRequestedFile(root, pathname);
 					if (rf) {
@@ -66,7 +66,7 @@ self.addEventListener('fetch', async evt => {
 						return createResponse(body, filename);
 					}
 				}
-				return new Response('LWS: Not found', { status: 404 });
+				return new Response('LWS-SW: Not found', { status: 404 });
 			})());
 		}
 	}
@@ -80,7 +80,7 @@ async function getRequestedFile(root, pathname) {
 	for (const filename of filenames) {
 		try {
 			const dir = await getDirectory(root, segments);
-			console.log(`LWS: Serving file: ${filename} from directory: ${dir.name}`);
+			console.log(`LWS-SW: Serving file: ${filename} from directory: ${dir.name}`);
 
 			// Retrieve the file handle and read its contents
 			const fileHandle = await dir.getFileHandle(filename);
@@ -104,14 +104,32 @@ async function getDirectory(rootHandle, pathSegments) {
 }
 
 function createResponse(body, filename) {
-	const ext = filename.split('.').pop().toLowerCase();
-	const mimeMap = {
-		'html': 'text/html; charset=utf-8',
+	const mime = {
 		'css' : 'text/css; charset=utf-8',
-		'js'  : 'application/javascript; charset=utf-8',
+		'csv' : 'text/csv; charset=utf-8',
+		'doc' : 'application/msword',
+		'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+		'htm' : 'text/html; charset=utf-8',
+		'html': 'text/html; charset=utf-8',
+		'jpg' : 'image/jpeg',
+		'jpeg': 'image/jpeg',
+		'js'  : 'text/javascript; charset=utf-8',
+		'json': 'application/json; charset=utf-8',
+		'mp3' : 'audio/mpeg',
+		'mp4' : 'video/mp4',
+		'png' : 'image/png',
+		'pdf' : 'application/pdf',
+		'ppt' : 'application/vnd.ms-powerpoint',
+		'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+		'svg' : 'image/svg+xml',
+		'txt' : 'text/plain; charset=utf-8',
+		'xls' : 'application/vnd.ms-excel',
+		'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+		'zip' : 'application/zip',
 	};
-	const contentType = mimeMap[ext] || 'application/octet-stream';
+	const ext  = filename.split('.').pop().toLowerCase();
+	const type = mime[ext] || 'application/octet-stream';
 	return new Response(body, {
-		headers: { 'Content-Type': contentType }
+		headers: { 'Content-Type': type }
 	});
 }
