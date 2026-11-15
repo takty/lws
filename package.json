@@ -1,0 +1,17 @@
+{
+	"name": "lws",
+	"version": "1.0.0",
+	"description": "Local Web Server for browser applications",
+	"license": "MIT",
+	"type": "module",
+	"packageManager": "yarn@4.18.0",
+	"scripts": {
+		"build": "node ./build.js",
+		"docs": "vite build",
+		"dev": "vite src/_docs --base ./"
+	},
+	"devDependencies": {
+		"esbuild": "^0.28.2",
+		"vite": "^8.3.5"
+	}
+}
