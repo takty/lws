@@ -5,19 +5,15 @@
 const TIMEOUT = 30_000;
 const REQUEST_TYPE = 'lws:request';
 const COMMAND_TYPE = 'lws:command';
-const RUNS = Symbol.for('lws.runs');
 const RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const runs = new Map();
+let listening = false;
 
-function getState() {
-	if (!globalThis[RUNS]) {
-		globalThis[RUNS] = { runs: new Map(), listening: false };
-	}
-	const state = globalThis[RUNS];
-	if (!state.listening && globalThis.navigator?.serviceWorker) {
+function listenForFileRequests() {
+	if (!listening && globalThis.navigator?.serviceWorker) {
 		navigator.serviceWorker.addEventListener('message', handleFileRequest);
-		state.listening = true;
+		listening = true;
 	}
-	return state;
 }
 
 function handleFileRequest(event) {
@@ -25,9 +21,16 @@ function handleFileRequest(event) {
 	const port = event.ports?.[0];
 	if (message?.type !== REQUEST_TYPE || !port) return;
 
-	const run = getState().runs.get(message.runId);
+	if (typeof message.runId !== 'string' || !RUN_ID.test(message.runId)) {
+		port.postMessage({ success: false, error: 'Invalid execution ID' });
+		port.close();
+		return;
+	}
+	const run = runs.get(message.runId);
+	if (!run) return;
+
 	const sourceUrl = event.source?.scriptURL;
-	if (!run || !run.active) {
+	if (!run.active) {
 		port.postMessage({ success: true, value: null });
 		port.close();
 		return;
@@ -120,8 +123,14 @@ function request(worker, message) {
 		const timer = setTimeout(() => finish(new Error('Local Web Server request timed out')), TIMEOUT);
 		channel.port1.onmessage = event => {
 			const reply = event.data;
-			if (reply?.success) finish(null, reply.value);
-			else finish(new Error(reply?.error ?? 'Local Web Server request failed'));
+			if (!reply || typeof reply.success !== 'boolean') {
+				finish(new Error('Invalid Local Web Server response'));
+			} else if (reply.success) {
+				if (reply.value !== undefined) finish(new Error('Invalid Local Web Server response'));
+				else finish(null);
+			} else {
+				finish(new Error(typeof reply.error === 'string' ? reply.error : 'Local Web Server request failed'));
+			}
 		};
 		channel.port1.onmessageerror = () => finish(new Error('Invalid Local Web Server response'));
 		try {
@@ -181,8 +190,8 @@ export class Lws {
 	 * @returns {Promise<{id: string, url: string}>}
 	 */
 	async publish(content, directoryHandle = null) {
-		const state = getState();
 		if (!globalThis.navigator?.serviceWorker) throw new Error('Service Workers are unavailable');
+		listenForFileRequests();
 		const normalized = validateContent(content, directoryHandle);
 		const registration = await this.#getRegistration();
 		const id = crypto.randomUUID();
@@ -190,10 +199,12 @@ export class Lws {
 			active: true,
 			content: normalized,
 			directoryHandle,
+			owner: this,
+			namespace: this.#namespace,
 			registration,
 			workerUrl: this.#workerUrl,
 		};
-		state.runs.set(id, run);
+		runs.set(id, run);
 		try {
 			const worker = await activatedWorker(registration);
 			const baseUrl = new URL(`${id}/`, registration.scope);
@@ -212,14 +223,14 @@ export class Lws {
 			return { id, url };
 		} catch (error) {
 			run.active = false;
-			state.runs.delete(id);
+			runs.delete(id);
 			try {
 				const worker = await activatedWorker(registration);
 				await request(worker, {
 					type: COMMAND_TYPE,
 					action: 'delete',
 					runId: id,
-					namespace: this.#namespace,
+					namespace: run.namespace,
 				});
 			} catch (cleanupError) {
 				console.error('Local Web Server cleanup failed:', cleanupError);
@@ -230,9 +241,9 @@ export class Lws {
 
 	async remove(id) {
 		if (typeof id !== 'string' || !RUN_ID.test(id)) throw new Error('Invalid execution ID');
-		const state = getState();
-		const run = state.runs.get(id);
+		const run = runs.get(id);
 		if (!run) throw new Error('Execution is not owned by this LWS client');
+		if (run.owner !== this) throw new Error('Execution is owned by a different LWS instance');
 		if (run.removing) throw new Error('Execution removal is already in progress');
 		run.removing = true;
 		run.active = false;
@@ -242,9 +253,9 @@ export class Lws {
 				type: COMMAND_TYPE,
 				action: 'delete',
 				runId: id,
-				namespace: this.#namespace,
+				namespace: run.namespace,
 			});
-			state.runs.delete(id);
+			runs.delete(id);
 		} catch (error) {
 			run.removing = false;
 			throw error;

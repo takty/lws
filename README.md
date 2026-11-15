@@ -25,12 +25,15 @@ await lws.remove(id);
 
 This is not an isolation boundary against other JavaScript running on the same origin. The owner client must remain open and responsive; requests fail if it closes, loses the in-memory execution, or cannot answer within the timeout.
 
+LWS does not automatically delete storage from older versions. A one-time application migration may remove only the known legacy names (`lws-db`, `${namespace}-v1`, and Cache Storage entries prefixed with `${namespace}-v1:${scope}`); do not remove the current `lws-v2` database or broadly clear origin storage.
+
 ## Development and distribution
 
 ```sh
 yarn dev    # Serve src/_docs with Vite
 yarn docs   # Build the documentation site into docs/
 yarn build  # Bundle the client and Service Worker into dist/
+yarn test   # Run client, Service Worker, and IndexedDB regression tests
 ```
 
 The distribution build emits `lws.min.js` and `lws-sw.min.js` with source maps. The Service Worker bundle includes its IndexedDB helper.

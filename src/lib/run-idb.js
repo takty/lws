@@ -13,17 +13,11 @@ export async function getRun(runId) {
 	return updateRun('get', runId);
 }
 
-export async function removeRun(runId, ownerClientId, namespace) {
-	return updateRun('delete', runId, undefined, ownerClientId, namespace);
-}
-
-export function deleteDatabase(name) {
-	return new Promise((resolve, reject) => {
-		const request = indexedDB.deleteDatabase(name);
-		request.onsuccess = () => resolve();
-		request.onerror = () => reject(request.error);
-		request.onblocked = () => reject(new Error(`Unable to remove legacy Local Web Server database: ${name}`));
-	});
+export async function removeRun(runId, ownerClientId, namespace, scope) {
+	if (typeof ownerClientId !== 'string' || typeof namespace !== 'string' || typeof scope !== 'string') {
+		throw new Error('Invalid execution owner metadata');
+	}
+	return updateRun('delete', runId, undefined, ownerClientId, namespace, scope);
 }
 
 function openDatabase() {
@@ -40,7 +34,7 @@ function openDatabase() {
 	});
 }
 
-async function updateRun(action, runId, metadata, ownerClientId, namespace) {
+async function updateRun(action, runId, metadata, ownerClientId, namespace, scope) {
 	const database = await openDatabase();
 	try {
 		return await new Promise((resolve, reject) => {
@@ -60,7 +54,8 @@ async function updateRun(action, runId, metadata, ownerClientId, namespace) {
 						return;
 					}
 					store.add(metadata, runId);
-				} else if (existing && (existing.ownerClientId !== ownerClientId || existing.namespace !== namespace)) {
+				} else if (existing && (existing.ownerClientId !== ownerClientId
+					|| existing.namespace !== namespace || existing.scope !== scope)) {
 					operationError = new Error('Only the execution owner may remove it');
 					transaction.abort();
 				} else if (existing) {

@@ -1,4 +1,4 @@
-import { addRun, deleteDatabase, getRun, removeRun } from './lib/run-idb.js';
+import { addRun, getRun, removeRun } from './lib/run-idb.js';
 
 /**
  * Local Web Server Service Worker
@@ -23,11 +23,7 @@ const TYPES = {
 };
 
 self.addEventListener('install', event => event.waitUntil(self.skipWaiting()));
-self.addEventListener('activate', event => event.waitUntil((async () => {
-	await self.clients.claim();
-	await deleteDatabase('lws-db');
-	await cleanLegacyData('lws');
-})()));
+self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 
 self.addEventListener('message', event => {
 	if (event.data?.type !== COMMAND_TYPE || !event.ports[0]) return;
@@ -39,7 +35,6 @@ self.addEventListener('message', event => {
 			validateCommand(client, runId, namespace);
 			let value;
 			if (action === 'put') {
-				await cleanLegacyData(namespace);
 				const metadata = {
 					ownerClientId: client.id,
 					namespace,
@@ -47,7 +42,7 @@ self.addEventListener('message', event => {
 				};
 				await addRun(runId, metadata);
 			} else if (action === 'delete') {
-				await removeRun(runId, client.id, namespace);
+				await removeRun(runId, client.id, namespace, self.registration.scope);
 			} else {
 				throw new Error('Unknown Local Web Server action');
 			}
@@ -62,8 +57,9 @@ self.addEventListener('message', event => {
 
 self.addEventListener('fetch', event => {
 	const url = new URL(event.request.url);
-	const scopePath = new URL(self.registration.scope).pathname;
-	if (!url.pathname.startsWith(scopePath)) return;
+	const scopeUrl = new URL(self.registration.scope);
+	const scopePath = scopeUrl.pathname.endsWith('/') ? scopeUrl.pathname : `${scopeUrl.pathname}/`;
+	if (url.origin !== scopeUrl.origin || !url.pathname.startsWith(scopePath)) return;
 	const remainder = url.pathname.slice(scopePath.length);
 	const separator = remainder.indexOf('/');
 	const runId = separator < 0 ? remainder : remainder.slice(0, separator);
@@ -72,7 +68,8 @@ self.addEventListener('fetch', event => {
 });
 
 function validateCommand(client, runId, namespace) {
-	if (!client || !client.id || !client.url || new URL(client.url).origin !== self.location.origin) {
+	if (!client || client.type !== 'window' || !client.id || !client.url
+		|| new URL(client.url).origin !== self.location.origin) {
 		throw new Error('Invalid Local Web Server client');
 	}
 	if (typeof runId !== 'string' || !RUN_ID.test(runId)) throw new Error('Invalid execution ID');
@@ -125,15 +122,24 @@ async function serveRequest(request, runId, encodedPath) {
 	try {
 		const owner = await self.clients.get(metadata.ownerClientId);
 		if (!owner || owner.type !== 'window' || new URL(owner.url).origin !== self.location.origin) {
-			await removeRun(runId, metadata.ownerClientId, metadata.namespace);
+			await removeRun(runId, metadata.ownerClientId, metadata.namespace, metadata.scope);
 			return failure(404);
 		}
 		let file = null;
 		let filename = '';
 		for (const path of requestedPaths) {
-			const source = await requestFile(owner, runId, path);
+			let source;
+			try {
+				source = await requestFile(owner, runId, path);
+			} catch (error) {
+				if (error.name === 'TimeoutError') {
+					await removeRun(runId, metadata.ownerClientId, metadata.namespace, metadata.scope);
+					return failure(504);
+				}
+				throw error;
+			}
 			if (source === null) {
-				await removeRun(runId, metadata.ownerClientId, metadata.namespace);
+				await removeRun(runId, metadata.ownerClientId, metadata.namespace, metadata.scope);
 				return failure(404);
 			}
 			if (source.kind === 'not-found') continue;
@@ -169,8 +175,8 @@ async function serveRequest(request, runId, encodedPath) {
 }
 
 function isValidMetadata(metadata) {
-	return metadata && typeof metadata.ownerClientId === 'string'
-		&& typeof metadata.namespace === 'string'
+	return metadata && typeof metadata.ownerClientId === 'string' && metadata.ownerClientId.length > 0
+		&& typeof metadata.namespace === 'string' && /^[\w.-]{1,64}$/u.test(metadata.namespace)
 		&& typeof metadata.scope === 'string';
 }
 
@@ -197,8 +203,20 @@ async function requestFile(client, runId, path) {
 		}, TIMEOUT);
 		channel.port1.onmessage = event => {
 			const reply = event.data;
-			if (reply?.success) finish(null, reply.value);
-			else finish(new Error(reply?.error ?? 'Invalid Local Web Server client response'));
+			if (!reply || typeof reply.success !== 'boolean') {
+				finish(new Error('Invalid Local Web Server client response'));
+			} else if (!reply.success) {
+				finish(new Error(typeof reply.error === 'string' ? reply.error : 'Invalid Local Web Server client response'));
+			} else if (reply.value === null || reply.value?.kind === 'not-found') {
+				finish(null, reply.value);
+			} else if (reply.value?.kind === 'generated' && typeof reply.value.text === 'string') {
+				finish(null, reply.value);
+			} else if (reply.value?.kind === 'source' && isDirectoryHandle(reply.value.directoryHandle)
+				&& typeof reply.value.path === 'string') {
+				finish(null, reply.value);
+			} else {
+				finish(new Error('Invalid Local Web Server client response'));
+			}
 		};
 		channel.port1.onmessageerror = () => finish(new Error('Invalid Local Web Server client response'));
 		try {
@@ -255,12 +273,4 @@ function failure(status, extraHeaders = {}) {
 		...extraHeaders,
 	});
 	return new Response(null, { status, headers });
-}
-
-async function cleanLegacyData(namespace) {
-	await deleteDatabase(`${namespace}-v1`);
-	const cachePrefix = `${namespace}-v1:${self.registration.scope}`;
-	for (const name of await caches.keys()) {
-		if (name.startsWith(cachePrefix)) await caches.delete(name);
-	}
 }
